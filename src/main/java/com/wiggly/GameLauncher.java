@@ -20,21 +20,31 @@ import java.util.jar.JarFile;
 public class GameLauncher extends JFrame {
     private JPanel gamePanel;
     private JButton loadGameButton;
-    private JButton portraitButton;
-    private JButton landscapeButton;
+    private JComboBox<String> resolutionComboBox;
+    private JButton modeToggleButton;
     private JLabel statusLabel;
     private JPanel keyMappingPanel;
     private Map<Integer, JLabel> keyDisplayLabels;
     private File currentGameJar;
     private KeyboardMapper keyMapper;
     private GameOrientation currentOrientation;
+    private Integer pendingT9Key = null;
+    private JLabel pendingLabel = null;
+    private boolean isPortraitMode = true;
+    private boolean isFullscreen = false;
+    private JPanel controlPanel;
+    private JPanel gamePanelWrapper;
     
     // Game orientation modes
     public enum GameOrientation {
-        PORTRAIT(240, 320),   // Common J2ME portrait size
-        LANDSCAPE(320, 240),  // Common J2ME landscape size
-        PORTRAIT_LARGE(320, 480),  // Larger portrait
-        LANDSCAPE_LARGE(480, 320); // Larger landscape
+        PORTRAIT_SMALL(176, 208),     // Small portrait
+        PORTRAIT_STANDARD(240, 320),   // Standard J2ME portrait
+        PORTRAIT_LARGE(320, 480),      // Large portrait
+        PORTRAIT_XLARGE(360, 640),     // Extra large portrait
+        LANDSCAPE_SMALL(208, 176),     // Small landscape
+        LANDSCAPE_STANDARD(320, 240),  // Standard J2ME landscape
+        LANDSCAPE_LARGE(480, 320),     // Large landscape
+        LANDSCAPE_XLARGE(640, 360);    // Extra large landscape
         
         private final int width;
         private final int height;
@@ -47,6 +57,10 @@ public class GameLauncher extends JFrame {
         public int getWidth() { return width; }
         public int getHeight() { return height; }
         public boolean isPortrait() { return height > width; }
+        
+        public String getDisplayName() {
+            return width + "x" + height;
+        }
     }
     
     // Additional control keys
@@ -79,8 +93,9 @@ public class GameLauncher extends JFrame {
         setLayout(new BorderLayout());
         
         keyMapper = new KeyboardMapper(DEFAULT_KEY_MAPPING);
-        currentOrientation = GameOrientation.PORTRAIT;
+        currentOrientation = GameOrientation.PORTRAIT_STANDARD;
         keyDisplayLabels = new HashMap<>();
+        isPortraitMode = true;
         
         initUI();
         
@@ -89,41 +104,39 @@ public class GameLauncher extends JFrame {
     
     private void initUI() {
         // Top panel with controls
-        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         loadGameButton = new JButton("Load JAR Game");
         loadGameButton.addActionListener(e -> loadGame());
         controlPanel.add(loadGameButton);
         
-        JButton settingsButton = new JButton("⚙ Settings");
-        settingsButton.addActionListener(e -> openSettings());
-        settingsButton.setToolTipText("Configure keyboard mappings");
-        controlPanel.add(settingsButton);
+        controlPanel.add(new JSeparator(SwingConstants.VERTICAL));
+        
+        JLabel instructionLabel = new JLabel("💡 Click any key button to reassign");
+        instructionLabel.setForeground(new Color(100, 150, 255));
+        controlPanel.add(instructionLabel);
         
         controlPanel.add(new JSeparator(SwingConstants.VERTICAL));
         
-        // Orientation controls
-        JLabel orientationLabel = new JLabel("Orientation:");
-        controlPanel.add(orientationLabel);
+        // Mode toggle and resolution dropdown
+        JLabel modeLabel = new JLabel("Mode:");
+        controlPanel.add(modeLabel);
         
-        portraitButton = new JButton("📱 Portrait");
-        portraitButton.addActionListener(e -> setOrientation(GameOrientation.PORTRAIT));
-        portraitButton.setToolTipText("Switch to portrait mode (240x320)");
-        controlPanel.add(portraitButton);
+        modeToggleButton = new JButton("📱 Portrait");
+        modeToggleButton.addActionListener(e -> toggleMode());
+        modeToggleButton.setToolTipText("Switch between portrait and landscape");
+        controlPanel.add(modeToggleButton);
         
-        landscapeButton = new JButton("📺 Landscape");
-        landscapeButton.addActionListener(e -> setOrientation(GameOrientation.LANDSCAPE));
-        landscapeButton.setToolTipText("Switch to landscape mode (320x240)");
-        controlPanel.add(landscapeButton);
+        JLabel resolutionLabel = new JLabel("Resolution:");
+        controlPanel.add(resolutionLabel);
         
-        JButton portraitLargeButton = new JButton("📱+");
-        portraitLargeButton.addActionListener(e -> setOrientation(GameOrientation.PORTRAIT_LARGE));
-        portraitLargeButton.setToolTipText("Large portrait (320x480)");
-        controlPanel.add(portraitLargeButton);
-        
-        JButton landscapeLargeButton = new JButton("📺+");
-        landscapeLargeButton.addActionListener(e -> setOrientation(GameOrientation.LANDSCAPE_LARGE));
-        landscapeLargeButton.setToolTipText("Large landscape (480x320)");
-        controlPanel.add(landscapeLargeButton);
+        resolutionComboBox = new JComboBox<>();
+        updateResolutionList();
+        resolutionComboBox.addActionListener(e -> {
+            if (resolutionComboBox.getSelectedItem() != null) {
+                changeResolution();
+            }
+        });
+        controlPanel.add(resolutionComboBox);
         
         controlPanel.add(new JSeparator(SwingConstants.VERTICAL));
         
@@ -142,7 +155,7 @@ public class GameLauncher extends JFrame {
         ));
         
         // Wrapper panel to center the game panel
-        JPanel gamePanelWrapper = new JPanel(new GridBagLayout());
+        gamePanelWrapper = new JPanel(new GridBagLayout());
         gamePanelWrapper.setBackground(Color.DARK_GRAY);
         gamePanelWrapper.add(gamePanel);
         
@@ -157,8 +170,24 @@ public class GameLauncher extends JFrame {
         KeyboardFocusManager.getCurrentKeyboardFocusManager()
             .addKeyEventDispatcher(keyMapper);
         
-        // Update button states
-        updateOrientationButtons();
+        // Add key capture listener for assignment
+        KeyboardFocusManager.getCurrentKeyboardFocusManager()
+            .addKeyEventDispatcher(this::handleKeyCapture);
+        
+        // Add fullscreen toggle listener (F11 to enter, ESC to exit)
+        KeyboardFocusManager.getCurrentKeyboardFocusManager()
+            .addKeyEventDispatcher(e -> {
+                if (e.getID() == KeyEvent.KEY_PRESSED) {
+                    if (e.getKeyCode() == KeyEvent.VK_F11) {
+                        toggleFullscreen();
+                        return true;
+                    } else if (e.getKeyCode() == KeyEvent.VK_ESCAPE && isFullscreen) {
+                        exitFullscreen();
+                        return true;
+                    }
+                }
+                return false;
+            });
     }
     
     private JPanel createKeyMappingPanel() {
@@ -300,6 +329,29 @@ public class GameLauncher extends JFrame {
         keyDisplayLabels.put(t9Key, keyLabel);
         updateKeyDisplayLabel(keyLabel, label, t9Key);
         
+        // Make clickable for key assignment
+        keyLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        keyLabel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                startKeyAssignment(t9Key, keyLabel);
+            }
+            
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                if (pendingT9Key == null || pendingT9Key != t9Key) {
+                    keyLabel.setBorder(new LineBorder(new Color(150, 150, 150), 2, true));
+                }
+            }
+            
+            @Override
+            public void mouseExited(MouseEvent e) {
+                if (pendingT9Key == null || pendingT9Key != t9Key) {
+                    keyLabel.setBorder(new LineBorder(new Color(80, 80, 80), 1, true));
+                }
+            }
+        });
+        
         return keyLabel;
     }
     
@@ -307,7 +359,7 @@ public class GameLauncher extends JFrame {
         // Find which QWERTY key is mapped to this T9 key
         String assignedKey = "—";
         for (Map.Entry<Integer, Integer> entry : keyMapper.getKeyMapping().entrySet()) {
-            if (entry.getValue() == t9Key) {
+            if (entry.getValue().equals(t9Key)) {
                 assignedKey = KeyEvent.getKeyText(entry.getKey());
                 break;
             }
@@ -330,11 +382,109 @@ public class GameLauncher extends JFrame {
         keyLabel.setText(displayText);
     }
     
-    private void openSettings() {
-        SettingsDialog settingsDialog = new SettingsDialog(this, keyMapper);
-        settingsDialog.setVisible(true);
-        // Update the key mapping display after settings dialog closes
-        updateKeyMappingDisplay();
+    private void startKeyAssignment(int t9Key, JLabel label) {
+        // Cancel any previous assignment
+        if (pendingLabel != null) {
+            resetLabelAppearance(pendingLabel, pendingT9Key);
+        }
+        
+        pendingT9Key = t9Key;
+        pendingLabel = label;
+        
+        // Highlight the button
+        label.setBackground(new Color(255, 200, 0));
+        label.setBorder(new LineBorder(new Color(255, 150, 0), 3, true));
+        
+        // Update status
+        statusLabel.setText("Press a key to assign to " + getBaseLabelForKey(t9Key) + " (or Backspace to clear)...");
+    }
+    
+    private void resetLabelAppearance(JLabel label, int t9Key) {
+        // Reset to original appearance
+        if (t9Key == KeyEvent.VK_ENTER) {
+            label.setBackground(new Color(60, 100, 150));
+        } else if (t9Key == KEY_CALL) {
+            label.setBackground(new Color(34, 139, 34));
+        } else if (t9Key == KEY_DISCONNECT) {
+            label.setBackground(new Color(178, 34, 34));
+        } else {
+            label.setBackground(new Color(50, 50, 50));
+        }
+        label.setBorder(new LineBorder(new Color(80, 80, 80), 1, true));
+    }
+    
+    private boolean handleKeyCapture(KeyEvent e) {
+        if (e.getID() != KeyEvent.KEY_PRESSED || pendingT9Key == null) {
+            return false;
+        }
+        
+        int pressedKey = e.getKeyCode();
+        
+        // Ignore modifier keys
+        if (pressedKey == KeyEvent.VK_SHIFT || pressedKey == KeyEvent.VK_CONTROL ||
+            pressedKey == KeyEvent.VK_ALT || pressedKey == KeyEvent.VK_META) {
+            return true;
+        }
+        
+        // Check if backspace was pressed to clear the mapping
+        if (pressedKey == KeyEvent.VK_BACK_SPACE) {
+            // Find and remove any key currently mapped to this T9 key
+            Integer keyToRemove = null;
+            for (Map.Entry<Integer, Integer> entry : keyMapper.getKeyMapping().entrySet()) {
+                if (entry.getValue().equals(pendingT9Key)) {
+                    keyToRemove = entry.getKey();
+                    break;
+                }
+            }
+            
+            if (keyToRemove != null) {
+                keyMapper.removeMapping(keyToRemove);
+            }
+            
+            // Update display to show no assignment
+            updateKeyDisplayLabel(pendingLabel, getBaseLabelForKey(pendingT9Key), pendingT9Key);
+            resetLabelAppearance(pendingLabel, pendingT9Key);
+            
+            // Update status
+            statusLabel.setText("Cleared assignment for " + getBaseLabelForKey(pendingT9Key));
+            
+            // Clear pending state
+            pendingT9Key = null;
+            pendingLabel = null;
+            
+            return true;
+        }
+        
+        // First, remove any old key that was mapped to this T9 key
+        Integer oldKeyForT9 = null;
+        for (Map.Entry<Integer, Integer> entry : keyMapper.getKeyMapping().entrySet()) {
+            if (entry.getValue().equals(pendingT9Key)) {
+                oldKeyForT9 = entry.getKey();
+                break;
+            }
+        }
+        if (oldKeyForT9 != null) {
+            keyMapper.removeMapping(oldKeyForT9);
+        }
+        
+        // Then, remove the new key's old mapping if it exists
+        keyMapper.removeMapping(pressedKey);
+        
+        // Add new mapping
+        keyMapper.updateMapping(pressedKey, pendingT9Key);
+        
+        // Update display
+        updateKeyDisplayLabel(pendingLabel, getBaseLabelForKey(pendingT9Key), pendingT9Key);
+        resetLabelAppearance(pendingLabel, pendingT9Key);
+        
+        // Update status
+        statusLabel.setText("Assigned " + KeyEvent.getKeyText(pressedKey) + " to " + getBaseLabelForKey(pendingT9Key));
+        
+        // Clear pending state
+        pendingT9Key = null;
+        pendingLabel = null;
+        
+        return true;
     }
     
     private void updateKeyMappingDisplay() {
@@ -384,6 +534,14 @@ public class GameLauncher extends JFrame {
             orientation.getWidth(),
             orientation.getHeight()
         ));
+        gamePanel.setMinimumSize(new Dimension(
+            orientation.getWidth(),
+            orientation.getHeight()
+        ));
+        gamePanel.setMaximumSize(new Dimension(
+            orientation.getWidth(),
+            orientation.getHeight()
+        ));
         
         // Update status
         String orientationType = orientation.isPortrait() ? "Portrait" : "Landscape";
@@ -397,20 +555,56 @@ public class GameLauncher extends JFrame {
                               " mode (" + sizeInfo + ")");
         }
         
-        // Revalidate and repaint
+        // Revalidate and repaint only the game panel
         gamePanel.revalidate();
         gamePanel.repaint();
-        
-        // Update button states
-        updateOrientationButtons();
-        
-        // Adjust window size if needed
-        pack();
     }
     
-    private void updateOrientationButtons() {
-        portraitButton.setEnabled(currentOrientation != GameOrientation.PORTRAIT);
-        landscapeButton.setEnabled(currentOrientation != GameOrientation.LANDSCAPE);
+    private void toggleMode() {
+        isPortraitMode = !isPortraitMode;
+        modeToggleButton.setText(isPortraitMode ? "📱 Portrait" : "📞 Landscape");
+        updateResolutionList();
+    }
+    
+    private void updateResolutionList() {
+        resolutionComboBox.removeAllItems();
+        
+        if (isPortraitMode) {
+            resolutionComboBox.addItem("176x208 (Small)");
+            resolutionComboBox.addItem("240x320 (Standard)");
+            resolutionComboBox.addItem("320x480 (Large)");
+            resolutionComboBox.addItem("360x640 (XLarge)");
+            resolutionComboBox.setSelectedItem("240x320 (Standard)");
+        } else {
+            resolutionComboBox.addItem("208x176 (Small)");
+            resolutionComboBox.addItem("320x240 (Standard)");
+            resolutionComboBox.addItem("480x320 (Large)");
+            resolutionComboBox.addItem("640x360 (XLarge)");
+            resolutionComboBox.setSelectedItem("320x240 (Standard)");
+        }
+    }
+    
+    private void changeResolution() {
+        String selected = (String) resolutionComboBox.getSelectedItem();
+        if (selected == null) return;
+        
+        GameOrientation newOrientation = null;
+        
+        if (isPortraitMode) {
+            if (selected.startsWith("176x208")) newOrientation = GameOrientation.PORTRAIT_SMALL;
+            else if (selected.startsWith("240x320")) newOrientation = GameOrientation.PORTRAIT_STANDARD;
+            else if (selected.startsWith("320x480")) newOrientation = GameOrientation.PORTRAIT_LARGE;
+            else if (selected.startsWith("360x640")) newOrientation = GameOrientation.PORTRAIT_XLARGE;
+        } else {
+            if (selected.startsWith("208x176")) newOrientation = GameOrientation.LANDSCAPE_SMALL;
+            else if (selected.startsWith("320x240")) newOrientation = GameOrientation.LANDSCAPE_STANDARD;
+            else if (selected.startsWith("480x320")) newOrientation = GameOrientation.LANDSCAPE_LARGE;
+            else if (selected.startsWith("640x360")) newOrientation = GameOrientation.LANDSCAPE_XLARGE;
+        }
+        
+        if (newOrientation != null) {
+            setOrientation(newOrientation);
+        }
     }
     
     private void loadGame() {
@@ -505,6 +699,56 @@ public class GameLauncher extends JFrame {
             e.printStackTrace();
             return null;
         }
+    }
+    
+    private void toggleFullscreen() {
+        if (isFullscreen) {
+            exitFullscreen();
+        } else {
+            enterFullscreen();
+        }
+    }
+    
+    private void enterFullscreen() {
+        // Hide all UI elements except the game panel
+        controlPanel.setVisible(false);
+        keyMappingPanel.setVisible(false);
+        
+        // Remove border from game panel
+        gamePanel.setBorder(null);
+        
+        // Set to fullscreen
+        dispose();
+        setUndecorated(true);
+        setExtendedState(JFrame.MAXIMIZED_BOTH);
+        setVisible(true);
+        
+        isFullscreen = true;
+        
+        // Center the game panel
+        gamePanelWrapper.revalidate();
+        gamePanelWrapper.repaint();
+    }
+    
+    private void exitFullscreen() {
+        // Restore window decoration
+        dispose();
+        setUndecorated(false);
+        setExtendedState(JFrame.NORMAL);
+        setVisible(true);
+        
+        // Show all UI elements
+        controlPanel.setVisible(true);
+        keyMappingPanel.setVisible(true);
+        
+        // Restore border on game panel
+        gamePanel.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        
+        isFullscreen = false;
+        
+        // Refresh layout
+        revalidate();
+        repaint();
     }
     
     public static void main(String[] args) {
