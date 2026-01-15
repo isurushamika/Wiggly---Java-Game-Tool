@@ -1,6 +1,8 @@
 package com.wiggly;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
 import java.awt.*;
 import java.awt.event.*;
 import java.io.File;
@@ -21,7 +23,8 @@ public class GameLauncher extends JFrame {
     private JButton portraitButton;
     private JButton landscapeButton;
     private JLabel statusLabel;
-    private JTextArea keyMappingInfo;
+    private JPanel keyMappingPanel;
+    private Map<Integer, JLabel> keyDisplayLabels;
     private File currentGameJar;
     private KeyboardMapper keyMapper;
     private GameOrientation currentOrientation;
@@ -46,6 +49,12 @@ public class GameLauncher extends JFrame {
         public boolean isPortrait() { return height > width; }
     }
     
+    // Additional control keys
+    private static final int KEY_SOFT_LEFT = 1000;  // Left soft key
+    private static final int KEY_SOFT_RIGHT = 1001; // Right soft key
+    private static final int KEY_CALL = 1002;       // Green call button
+    private static final int KEY_DISCONNECT = 1003; // Red disconnect button
+
     // Default T9 keypad mapping
     // Q=1, W=2, E=3, A=4, S=5, D=6, Z=7, X=8, C=9, V=*, Space=0, B=#
     private static final Map<Integer, Integer> DEFAULT_KEY_MAPPING = new HashMap<Integer, Integer>() {{
@@ -71,6 +80,7 @@ public class GameLauncher extends JFrame {
         
         keyMapper = new KeyboardMapper(DEFAULT_KEY_MAPPING);
         currentOrientation = GameOrientation.PORTRAIT;
+        keyDisplayLabels = new HashMap<>();
         
         initUI();
         
@@ -138,22 +148,10 @@ public class GameLauncher extends JFrame {
         
         add(gamePanelWrapper, BorderLayout.CENTER);
         
-        // Right panel with key mapping info
-        JPanel infoPanel = new JPanel(new BorderLayout());
-        infoPanel.setPreferredSize(new Dimension(200, 0));
-        
-        JLabel infoLabel = new JLabel("T9 Key Mapping:");
-        infoLabel.setFont(new Font("Arial", Font.BOLD, 14));
-        infoPanel.add(infoLabel, BorderLayout.NORTH);
-        
-        keyMappingInfo = new JTextArea();
-        keyMappingInfo.setEditable(false);
-        keyMappingInfo.setText(getKeyMappingText());
-        keyMappingInfo.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        JScrollPane scrollPane = new JScrollPane(keyMappingInfo);
-        infoPanel.add(scrollPane, BorderLayout.CENTER);
-        
-        add(infoPanel, BorderLayout.EAST);
+        // Right panel with key mapping visual
+        keyMappingPanel = createKeyMappingPanel();
+        keyMappingPanel.setPreferredSize(new Dimension(280, 0));
+        add(keyMappingPanel, BorderLayout.EAST);
         
         // Add global key listener
         KeyboardFocusManager.getCurrentKeyboardFocusManager()
@@ -161,6 +159,175 @@ public class GameLauncher extends JFrame {
         
         // Update button states
         updateOrientationButtons();
+    }
+    
+    private JPanel createKeyMappingPanel() {
+        JPanel mainPanel = new JPanel(new BorderLayout(5, 5));
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        mainPanel.setBackground(new Color(45, 45, 45));
+        
+        JLabel headerLabel = new JLabel("T9 Key Mapping", SwingConstants.CENTER);
+        headerLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        headerLabel.setForeground(Color.WHITE);
+        headerLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 10, 5));
+        mainPanel.add(headerLabel, BorderLayout.NORTH);
+        
+        // T9 Visual keyboard
+        JPanel t9Panel = new JPanel();
+        t9Panel.setLayout(new BoxLayout(t9Panel, BoxLayout.Y_AXIS));
+        t9Panel.setBackground(new Color(35, 35, 35));
+        t9Panel.setBorder(BorderFactory.createCompoundBorder(
+            new LineBorder(new Color(60, 60, 60), 2, true),
+            new EmptyBorder(15, 15, 15, 15)
+        ));
+        
+        // Control section with soft keys, D-pad, and call buttons arranged around D-pad
+        JPanel controlSection = createControlSection();
+        controlSection.setAlignmentX(Component.CENTER_ALIGNMENT);
+        t9Panel.add(controlSection);
+        t9Panel.add(Box.createVerticalStrut(10));
+        
+        // T9 Keypad
+        JPanel keypadPanel = createCompactKeypad();
+        keypadPanel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        t9Panel.add(keypadPanel);
+        
+        mainPanel.add(t9Panel, BorderLayout.CENTER);
+        
+        return mainPanel;
+    }
+    
+    private JPanel createControlSection() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setOpaque(false);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(2, 2, 2, 2);
+        
+        // Left soft key (left of D-pad up)
+        gbc.gridx = 0; gbc.gridy = 0;
+        JLabel leftSoftKey = createKeyDisplay("L", KEY_SOFT_LEFT);
+        leftSoftKey.setPreferredSize(new Dimension(60, 60));
+        panel.add(leftSoftKey, gbc);
+        
+        // D-pad Up
+        gbc.gridx = 1; gbc.gridy = 0;
+        JLabel upButton = createKeyDisplay("▲", KeyEvent.VK_UP);
+        upButton.setPreferredSize(new Dimension(60, 60));
+        panel.add(upButton, gbc);
+        
+        // Right soft key (right of D-pad up)
+        gbc.gridx = 2; gbc.gridy = 0;
+        JLabel rightSoftKey = createKeyDisplay("R", KEY_SOFT_RIGHT);
+        rightSoftKey.setPreferredSize(new Dimension(60, 60));
+        panel.add(rightSoftKey, gbc);
+        
+        // D-pad Left, OK, Right
+        gbc.gridx = 0; gbc.gridy = 1;
+        JLabel leftButton = createKeyDisplay("◄", KeyEvent.VK_LEFT);
+        leftButton.setPreferredSize(new Dimension(60, 60));
+        panel.add(leftButton, gbc);
+        
+        gbc.gridx = 1; gbc.gridy = 1;
+        JLabel okLabel = createKeyDisplay("OK", KeyEvent.VK_ENTER);
+        okLabel.setPreferredSize(new Dimension(60, 60));
+        okLabel.setBackground(new Color(60, 100, 150));
+        panel.add(okLabel, gbc);
+        
+        gbc.gridx = 2; gbc.gridy = 1;
+        JLabel rightButton = createKeyDisplay("►", KeyEvent.VK_RIGHT);
+        rightButton.setPreferredSize(new Dimension(60, 60));
+        panel.add(rightButton, gbc);
+        
+        // Call button (left of down)
+        gbc.gridx = 0; gbc.gridy = 2;
+        JLabel callButton = createKeyDisplay("📞", KEY_CALL);
+        callButton.setPreferredSize(new Dimension(60, 60));
+        callButton.setBackground(new Color(34, 139, 34));
+        panel.add(callButton, gbc);
+        
+        // D-pad Down
+        gbc.gridx = 1; gbc.gridy = 2;
+        JLabel downButton = createKeyDisplay("▼", KeyEvent.VK_DOWN);
+        downButton.setPreferredSize(new Dimension(60, 60));
+        panel.add(downButton, gbc);
+        
+        // Disconnect button (right of down)
+        gbc.gridx = 2; gbc.gridy = 2;
+        JLabel disconnectButton = createKeyDisplay("✖", KEY_DISCONNECT);
+        disconnectButton.setPreferredSize(new Dimension(60, 60));
+        disconnectButton.setBackground(new Color(178, 34, 34));
+        panel.add(disconnectButton, gbc);
+        
+        return panel;
+    }
+
+    private JPanel createCompactKeypad() {
+        JPanel panel = new JPanel(new GridLayout(4, 3, 4, 4));
+        panel.setOpaque(false);
+        
+        int[] keys = {
+            KeyEvent.VK_NUMPAD1, KeyEvent.VK_NUMPAD2, KeyEvent.VK_NUMPAD3,
+            KeyEvent.VK_NUMPAD4, KeyEvent.VK_NUMPAD5, KeyEvent.VK_NUMPAD6,
+            KeyEvent.VK_NUMPAD7, KeyEvent.VK_NUMPAD8, KeyEvent.VK_NUMPAD9,
+            KeyEvent.VK_MULTIPLY, KeyEvent.VK_NUMPAD0, KeyEvent.VK_ADD
+        };
+        
+        String[] labels = {"1", "2\nABC", "3\nDEF", 
+                          "4\nGHI", "5\nJKL", "6\nMNO",
+                          "7\nPQRS", "8\nTUV", "9\nWXYZ",
+                          "*", "0", "#"};
+        
+        for (int i = 0; i < keys.length; i++) {
+            JLabel keyLabel = createKeyDisplay(labels[i], keys[i]);
+            keyLabel.setPreferredSize(new Dimension(60, 55));
+            panel.add(keyLabel);
+        }
+        
+        return panel;
+    }
+    
+    private JLabel createKeyDisplay(String label, int t9Key) {
+        JLabel keyLabel = new JLabel();
+        keyLabel.setOpaque(true);
+        keyLabel.setBackground(new Color(50, 50, 50));
+        keyLabel.setForeground(Color.WHITE);
+        keyLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        keyLabel.setVerticalAlignment(SwingConstants.CENTER);
+        keyLabel.setFont(new Font("Arial", Font.BOLD, 11));
+        keyLabel.setBorder(new LineBorder(new Color(80, 80, 80), 1, true));
+        keyLabel.setPreferredSize(new Dimension(45, 40));
+        
+        keyDisplayLabels.put(t9Key, keyLabel);
+        updateKeyDisplayLabel(keyLabel, label, t9Key);
+        
+        return keyLabel;
+    }
+    
+    private void updateKeyDisplayLabel(JLabel keyLabel, String baseLabel, int t9Key) {
+        // Find which QWERTY key is mapped to this T9 key
+        String assignedKey = "—";
+        for (Map.Entry<Integer, Integer> entry : keyMapper.getKeyMapping().entrySet()) {
+            if (entry.getValue() == t9Key) {
+                assignedKey = KeyEvent.getKeyText(entry.getKey());
+                break;
+            }
+        }
+        
+        // Build HTML label
+        String displayText;
+        if (baseLabel.contains("\n")) {
+            String[] parts = baseLabel.split("\n");
+            displayText = "<html><center><b>" + parts[0] + "</b>";
+            if (parts.length > 1) {
+                displayText += "<br><span style='font-size:8px'>" + parts[1] + "</span>";
+            }
+            displayText += "<br><span style='font-size:9px;color:#FFA500'>" + assignedKey + "</span></center></html>";
+        } else {
+            displayText = "<html><center><b>" + baseLabel + "</b>" +
+                         "<br><span style='font-size:9px;color:#FFA500'>" + assignedKey + "</span></center></html>";
+        }
+        
+        keyLabel.setText(displayText);
     }
     
     private void openSettings() {
@@ -171,7 +338,42 @@ public class GameLauncher extends JFrame {
     }
     
     private void updateKeyMappingDisplay() {
-        keyMappingInfo.setText(getKeyMappingText());
+        // Update all key display labels
+        for (Map.Entry<Integer, JLabel> entry : keyDisplayLabels.entrySet()) {
+            int t9Key = entry.getKey();
+            JLabel label = entry.getValue();
+            
+            // Determine base label based on key type
+            String baseLabel = getBaseLabelForKey(t9Key);
+            updateKeyDisplayLabel(label, baseLabel, t9Key);
+        }
+    }
+    
+    private String getBaseLabelForKey(int t9Key) {
+        return switch (t9Key) {
+            case KeyEvent.VK_NUMPAD1 -> "1";
+            case KeyEvent.VK_NUMPAD2 -> "2\nABC";
+            case KeyEvent.VK_NUMPAD3 -> "3\nDEF";
+            case KeyEvent.VK_NUMPAD4 -> "4\nGHI";
+            case KeyEvent.VK_NUMPAD5 -> "5\nJKL";
+            case KeyEvent.VK_NUMPAD6 -> "6\nMNO";
+            case KeyEvent.VK_NUMPAD7 -> "7\nPQRS";
+            case KeyEvent.VK_NUMPAD8 -> "8\nTUV";
+            case KeyEvent.VK_NUMPAD9 -> "9\nWXYZ";
+            case KeyEvent.VK_NUMPAD0 -> "0";
+            case KeyEvent.VK_MULTIPLY -> "*";
+            case KeyEvent.VK_ADD -> "#";
+            case KeyEvent.VK_UP -> "▲";
+            case KeyEvent.VK_DOWN -> "▼";
+            case KeyEvent.VK_LEFT -> "◄";
+            case KeyEvent.VK_RIGHT -> "►";
+            case KeyEvent.VK_ENTER -> "OK";
+            case KEY_SOFT_LEFT -> "L";
+            case KEY_SOFT_RIGHT -> "R";
+            case KEY_CALL -> "📞";
+            case KEY_DISCONNECT -> "✖";
+            default -> "";
+        };
     }
     
     private void setOrientation(GameOrientation orientation) {
@@ -209,51 +411,6 @@ public class GameLauncher extends JFrame {
     private void updateOrientationButtons() {
         portraitButton.setEnabled(currentOrientation != GameOrientation.PORTRAIT);
         landscapeButton.setEnabled(currentOrientation != GameOrientation.LANDSCAPE);
-    }
-    
-    private String getKeyMappingText() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("QWERTY → T9 Keypad\n");
-        sb.append("==================\n\n");
-        
-        // Get current mappings from keyMapper
-        Map<Integer, Integer> mappings = keyMapper.getKeyMapping();
-        
-        // Group mappings by T9 key
-        Map<Integer, String> t9ToQwerty = new HashMap<>();
-        for (Map.Entry<Integer, Integer> entry : mappings.entrySet()) {
-            int qwertyKey = entry.getKey();
-            int t9Key = entry.getValue();
-            String qwertyName = KeyEvent.getKeyText(qwertyKey);
-            t9ToQwerty.put(t9Key, qwertyName);
-        }
-        
-        // T9 Number pad
-        sb.append("Number Pad:\n");
-        for (int i = 1; i <= 9; i++) {
-            int keyCode = KeyEvent.VK_NUMPAD0 + i;
-            String qwerty = t9ToQwerty.getOrDefault(keyCode, "—");
-            sb.append(qwerty).append(" → ").append(i);
-            if (i == 5) sb.append(" (Select)");
-            sb.append("\n");
-            if (i % 3 == 0) sb.append("\n");
-        }
-        
-        String zero = t9ToQwerty.getOrDefault(KeyEvent.VK_NUMPAD0, "—");
-        String star = t9ToQwerty.getOrDefault(KeyEvent.VK_MULTIPLY, "—");
-        String hash = t9ToQwerty.getOrDefault(KeyEvent.VK_ADD, "—");
-        
-        sb.append(star).append(" → *\n");
-        sb.append(zero).append(" → 0\n");
-        sb.append(hash).append(" → #\n\n");
-        
-        sb.append("==================\n");
-        sb.append("Additional Keys:\n");
-        sb.append("ESC → Back/Exit\n");
-        sb.append("ENTER → OK/Select\n");
-        sb.append("Arrow Keys → Navigation\n");
-        
-        return sb.toString();
     }
     
     private void loadGame() {
